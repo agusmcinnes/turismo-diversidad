@@ -12,6 +12,7 @@ import Image from "next/image"
 export default function TravelPackagesSection() {
   const [packages, setPackages] = useState<TravelPackage[]>([])
   const [loading, setLoading] = useState(true)
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function fetchPackages() {
@@ -32,6 +33,10 @@ export default function TravelPackagesSection() {
 
     fetchPackages()
   }, [])
+
+  const handleImageError = (packageId: string) => {
+    setImageErrors(prev => new Set(prev).add(packageId))
+  }
 
   if (loading) {
     return (
@@ -82,12 +87,22 @@ export default function TravelPackagesSection() {
               className="group hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 overflow-hidden bg-white p-0"
             >
               <div className="relative h-64 overflow-hidden">
-                <Image
-                  src={pkg.image_url || "/placeholder.svg?height=400&width=600&query=esteros del ibera landscape"}
-                  alt={pkg.name}
-                  fill
-                  className="object-cover group-hover:scale-110 transition-transform duration-300"
-                />
+                {!pkg.image_url || imageErrors.has(pkg.id) ? (
+                  <div className="w-full h-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center">
+                    <div className="text-center text-white">
+                      <MapPin className="w-16 h-16 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm opacity-75">Imagen no disponible</p>
+                    </div>
+                  </div>
+                ) : (
+                  <Image
+                    src={pkg.image_url}
+                    alt={pkg.name}
+                    fill
+                    className="object-cover group-hover:scale-110 transition-transform duration-300"
+                    onError={() => handleImageError(pkg.id)}
+                  />
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
                 <div className="absolute bottom-4 left-4 right-4">
                   <h3 className="text-xl font-bold text-white mb-2">{pkg.name}</h3>

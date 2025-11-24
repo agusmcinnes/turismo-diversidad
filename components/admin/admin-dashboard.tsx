@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { TravelPackage } from "@/types/travel-package"
+import { deletePackageImageByUrl } from "@/lib/supabase/storage"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -74,13 +75,32 @@ export default function AdminDashboard() {
     if (!confirm("¿Estás seguro de que quieres eliminar este paquete?")) return
 
     const supabase = createClient()
-    const { error } = await supabase.from("travel_packages").delete().eq("id", id)
 
-    if (error) {
+    try {
+      // Obtener el paquete para verificar si tiene imagen
+      const packageToDelete = packages.find((pkg) => pkg.id === id)
+
+      // Eliminar el registro de la base de datos
+      const { error } = await supabase.from("travel_packages").delete().eq("id", id)
+
+      if (error) {
+        throw error
+      }
+
+      // Si el paquete tiene una imagen en Supabase Storage, eliminarla
+      if (packageToDelete?.image_url) {
+        try {
+          await deletePackageImageByUrl(packageToDelete.image_url)
+        } catch (imageError) {
+          console.error("Error deleting image:", imageError)
+          // Continuar aunque falle la eliminación de la imagen
+        }
+      }
+
+      setPackages(packages.filter((pkg) => pkg.id !== id))
+    } catch (error) {
       console.error("Error deleting package:", error)
       alert("Error al eliminar el paquete")
-    } else {
-      setPackages(packages.filter((pkg) => pkg.id !== id))
     }
   }
 

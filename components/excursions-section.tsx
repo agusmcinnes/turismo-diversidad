@@ -12,6 +12,7 @@ import { Calendar, MapPin, Car, Star } from "lucide-react"
 export default function ExcursionsSection() {
   const [excursions, setExcursions] = useState<TravelPackage[]>([])
   const [loading, setLoading] = useState(true)
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function fetchExcursions() {
@@ -32,6 +33,10 @@ export default function ExcursionsSection() {
 
     fetchExcursions()
   }, [])
+
+  const handleImageError = (excursionId: string) => {
+    setImageErrors(prev => new Set(prev).add(excursionId))
+  }
 
   if (loading) {
     return (
@@ -82,12 +87,22 @@ export default function ExcursionsSection() {
                 className="group hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 overflow-hidden bg-white p-0"
               >
                 <div className="relative h-64 overflow-hidden">
-                  <Image
-                    src={excursion.image_url || "/placeholder.svg?height=400&width=600&query=esteros del ibera excursion"}
-                    alt={excursion.name}
-                    fill
-                    className="object-cover group-hover:scale-110 transition-transform duration-300"
-                  />
+                  {!excursion.image_url || imageErrors.has(excursion.id) ? (
+                    <div className="w-full h-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
+                      <div className="text-center text-white">
+                        <MapPin className="w-16 h-16 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm opacity-75">Imagen no disponible</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <Image
+                      src={excursion.image_url}
+                      alt={excursion.name}
+                      fill
+                      className="object-cover group-hover:scale-110 transition-transform duration-300"
+                      onError={() => handleImageError(excursion.id)}
+                    />
+                  )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
                   <div className="absolute bottom-4 left-4 right-4">
                     <h3 className="text-xl font-bold text-white mb-2">{excursion.name}</h3>

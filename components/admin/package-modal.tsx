@@ -5,6 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { TravelPackage, CreateTravelPackageData, PackageType } from "@/types/travel-package"
+import { uploadPackageImage, updatePackageImage, validateImageFile, isSupabaseStorageUrl } from "@/lib/supabase/storage"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { X, Plus } from "lucide-react"
+import { X, Plus, Upload, Image as ImageIcon } from "lucide-react"
 
 interface PackageModalProps {
   isOpen: boolean
@@ -37,6 +38,10 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
   const [newService, setNewService] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string>("")
+  const [uploadProgress, setUploadProgress] = useState<string>("")
+  const [useExistingUrl, setUseExistingUrl] = useState(false)
 
   useEffect(() => {
     if (editingPackage) {
@@ -52,6 +57,8 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
         image_url: editingPackage.image_url || "",
         price: editingPackage.price,
       })
+      setImagePreview(editingPackage.image_url || "")
+      setUseExistingUrl(!!editingPackage.image_url)
     } else {
       setFormData({
         name: "",
@@ -65,9 +72,47 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
         image_url: "",
         price: undefined,
       })
+      setImagePreview("")
+      setUseExistingUrl(false)
     }
     setErrors({})
+    setSelectedFile(null)
+    setUploadProgress("")
   }, [editingPackage, isOpen])
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validar archivo
+    const validation = validateImageFile(file)
+    if (!validation.valid) {
+      setErrors({ ...errors, image: validation.error || "" })
+      return
+    }
+
+    // Limpiar errores previos
+    const newErrors = { ...errors }
+    delete newErrors.image
+    setErrors(newErrors)
+
+    setSelectedFile(file)
+    setUseExistingUrl(false)
+
+    // Crear preview
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImage = () => {
+    setSelectedFile(null)
+    setImagePreview("")
+    setUseExistingUrl(false)
+    setFormData({ ...formData, image_url: "" })
+  }
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
@@ -93,13 +138,50 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
     const supabase = createClient()
 
     try {
+      let imageUrl = formData.image_url
+
+      // Si hay un archivo seleccionado, subirlo primero
+      if (selectedFile) {
+        setUploadProgress("Optimizando imagen...")
+
+        // Generar un ID temporal si es un paquete nuevo
+        const packageId = editingPackage?.id || crypto.randomUUID()
+
+        if (editingPackage) {
+          setUploadProgress("Subiendo nueva imagen...")
+          const result = await updatePackageImage(selectedFile, packageId, formData.image_url)
+          imageUrl = result.url
+        } else {
+          setUploadProgress("Subiendo imagen...")
+          const result = await uploadPackageImage(selectedFile, packageId)
+          imageUrl = result.url
+        }
+      }
+
+      // Actualizar formData con la URL de la imagen
+      const dataToSave = {
+        ...formData,
+        image_url: imageUrl || null,
+      }
+
+      setUploadProgress("Guardando paquete...")
+
       let result
       if (editingPackage) {
         // Update existing package
-        result = await supabase.from("travel_packages").update(formData).eq("id", editingPackage.id).select().single()
+        result = await supabase
+          .from("travel_packages")
+          .update(dataToSave)
+          .eq("id", editingPackage.id)
+          .select()
+          .single()
       } else {
         // Create new package
-        result = await supabase.from("travel_packages").insert(formData).select().single()
+        result = await supabase
+          .from("travel_packages")
+          .insert(dataToSave)
+          .select()
+          .single()
       }
 
       if (result.error) throw result.error
@@ -108,9 +190,12 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
       onClose()
     } catch (error) {
       console.error("Error saving package:", error)
-      setErrors({ submit: "Error al guardar el paquete. Inténtalo de nuevo." })
+      setErrors({
+        submit: error instanceof Error ? error.message : "Error al guardar el paquete. Inténtalo de nuevo."
+      })
     } finally {
       setIsLoading(false)
+      setUploadProgress("")
     }
   }
 
@@ -260,13 +345,72 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="image_url">URL de Imagen</Label>
-            <Input
-              id="image_url"
-              value={formData.image_url}
-              onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
-              placeholder="https://ejemplo.com/imagen.jpg (opcional)"
-            />
+            <Label htmlFor="image">Imagen de Portada</Label>
+
+            {/* Preview de imagen existente o seleccionada */}
+            {imagePreview && (
+              <div className="relative w-full h-48 rounded-lg overflow-hidden border-2 border-gray-200">
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="w-full h-full object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                {editingPackage?.image_url && !selectedFile && (
+                  <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
+                    {isSupabaseStorageUrl(editingPackage.image_url) ? "Imagen en Supabase" : "URL Externa"}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Input de archivo */}
+            <div className="flex items-center gap-2">
+              <Input
+                id="image"
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <Label
+                htmlFor="image"
+                className="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-lg p-4 cursor-pointer hover:border-green-500 transition-colors"
+              >
+                {selectedFile ? (
+                  <>
+                    <ImageIcon className="w-5 h-5 text-green-600" />
+                    <span className="text-sm text-green-600">{selectedFile.name}</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5 text-gray-400" />
+                    <span className="text-sm text-gray-500">
+                      {imagePreview ? "Cambiar imagen" : "Seleccionar imagen"}
+                    </span>
+                  </>
+                )}
+              </Label>
+            </div>
+
+            {errors.image && <p className="text-sm text-red-500">{errors.image}</p>}
+
+            <p className="text-xs text-gray-500">
+              Tamaño máximo: 5MB. La imagen se optimizará automáticamente.
+            </p>
+
+            {/* Opción de mantener URL existente (solo al editar) */}
+            {editingPackage?.image_url && !isSupabaseStorageUrl(editingPackage.image_url) && (
+              <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                URL externa actual: <span className="font-mono text-xs break-all">{editingPackage.image_url}</span>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -308,7 +452,11 @@ export default function PackageModal({ isOpen, onClose, onSave, editingPackage }
               Cancelar
             </Button>
             <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={isLoading}>
-              {isLoading ? "Guardando..." : editingPackage ? "Actualizar" : "Crear Paquete"}
+              {isLoading ? (
+                uploadProgress || "Guardando..."
+              ) : (
+                editingPackage ? "Actualizar" : "Crear Paquete"
+              )}
             </Button>
           </div>
         </form>
